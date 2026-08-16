@@ -1,0 +1,426 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+#  kostal_em_query - Read only query of the Kostal Smart Energy Meter using TCP/IP modbus protocol
+#  Copyright (C) 2018  Kilian Knoll 
+#  
+#  This program is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+#
+#  Please note that any incorrect or careless usage of this module as well as errors in the implementation can damage your Smart Energy Meter!
+#  Therefore, the author does not provide any guarantee or warranty concerning to correctness, functionality or performance and does not accept any liability for damage caused by this module, examples or mentioned information.
+#  Thus, use it at your own risk!
+#
+#
+#  Purpose: 
+#           Query values from Kostal Smart Energy Meter 
+#           
+#  Based on the documentation provided by Kostal:
+#  https://www.kostal-solar-electric.com/de-de/download/-/media/document-library-folder---kse/2019/05/09/13/57/ba_kostal_interface_ksem---201905.pdf
+#
+# Requires pymodbus
+# Tested with:
+#
+# Please change the IP address of your Inverter (e.g. 192.168.178.41 and Port (default 1502) to suite your environment - see below)
+#
+
+import pymodbus
+from pymodbus.client import ModbusTcpClient
+from pymodbus.constants import Endian
+from pymodbus.payload import BinaryPayloadDecoder
+from pprint import pprint
+import time
+from datetime import datetime
+
+class kostal_em_query:
+    def __init__(self):
+        #Change the IP address and port to suite your environment:
+        self.inverter_ip="10.0.0.70"
+        self.inverter_port="502"
+        #No more changes required beyond this point
+        self.KostalRegister = []
+        self.Adr0=[]
+        self.Adr0=[40]
+        self.Adr0.append("L1 Wirkleistung+")
+        self.Adr0.append("U32")
+        self.Adr0.append(0)
+        self.Adr1=[]
+        self.Adr1=[42]
+        self.Adr1.append("L1 Wirkleistung-")
+        self.Adr1.append("U32")
+        self.Adr1.append(0)
+        self.Adr2=[]
+        self.Adr2=[44]
+        self.Adr2.append("L1 Blindleistung+")
+        self.Adr2.append("U32")
+        self.Adr2.append(0)
+        self.Adr3=[]
+        self.Adr3=[46]
+        self.Adr3.append("L1 Blindleistung-")
+        self.Adr3.append("U32")
+        self.Adr3.append(0)
+        self.Adr4=[]
+        self.Adr4=[56]
+        self.Adr4.append("L1 Scheinleistung+")
+        self.Adr4.append("U32")
+        self.Adr4.append(0)
+        self.Adr5=[]
+        self.Adr5=[58]
+        self.Adr5.append("L1 Scheinleistung-")
+        self.Adr5.append("U32")
+        self.Adr5.append(0)
+        self.Adr6=[]
+        self.Adr6=[60]
+        self.Adr6.append("L1 Strom")
+        self.Adr6.append("U32")
+        self.Adr6.append(0)
+        self.Adr7=[]
+        self.Adr7=[62]
+        self.Adr7.append("L1 Spannung")
+        self.Adr7.append("U32")
+        self.Adr7.append(0)
+        self.Adr8=[]
+        self.Adr8=[64]
+        self.Adr8.append("L1 Leistungsfaktor")
+        self.Adr8.append("U32")
+        self.Adr8.append(0)
+        
+        self.Adr9=[]
+        self.Adr9=[80]
+        self.Adr9.append("L2 Wirkleistung+")
+        self.Adr9.append("U32")
+        self.Adr9.append(0)
+        self.Adr10=[]
+        self.Adr10=[82]
+        self.Adr10.append("L2 Wirkleistung-")
+        self.Adr10.append("U32")
+        self.Adr10.append(0)
+        self.Adr11=[]
+        self.Adr11=[84]
+        self.Adr11.append("L2 Blindleistung+")
+        self.Adr11.append("U32")
+        self.Adr11.append(0)
+        self.Adr12=[]
+        self.Adr12=[86]
+        self.Adr12.append("L2 Blindleistung-")
+        self.Adr12.append("U32")
+        self.Adr12.append(0)
+        self.Adr13=[]
+        self.Adr13=[96]
+        self.Adr13.append("L2 Scheinleistung+")
+        self.Adr13.append("U32")
+        self.Adr13.append(0)
+        self.Adr14=[]
+        self.Adr14=[98]
+        self.Adr14.append("L2 Scheinleistung-")
+        self.Adr14.append("U32")
+        self.Adr14.append(0)
+        self.Adr15=[]
+        self.Adr15=[100]
+        self.Adr15.append("L2 Strom")
+        self.Adr15.append("U32")
+        self.Adr15.append(0)
+        self.Adr16=[]
+        self.Adr16=[102]
+        self.Adr16.append("L2 Spannung")
+        self.Adr16.append("U32")
+        self.Adr16.append(0)
+        self.Adr17=[]
+        self.Adr17=[104]
+        self.Adr17.append("L2 Leistungsfaktor")
+        self.Adr17.append("U32")
+        self.Adr17.append(0)
+
+        self.Adr18=[]
+        self.Adr18=[120]
+        self.Adr18.append("L3 Wirkleistung+")
+        self.Adr18.append("U32")
+        self.Adr18.append(0)
+        self.Adr19=[]
+        self.Adr19=[122]
+        self.Adr19.append("L3 Wirkleistung-")
+        self.Adr19.append("U32")
+        self.Adr19.append(0)
+        self.Adr20=[]
+        self.Adr20=[124]
+        self.Adr20.append("L3 Blindleistung+")
+        self.Adr20.append("U32")
+        self.Adr20.append(0)
+        self.Adr21=[]
+        self.Adr21=[126]
+        self.Adr21.append("L3 Blindleistung-")
+        self.Adr21.append("U32")
+        self.Adr21.append(0)
+        self.Adr22=[]
+        self.Adr22=[136]
+        self.Adr22.append("L3 Scheinleistung+")
+        self.Adr22.append("U32")
+        self.Adr22.append(0)
+        self.Adr23=[]
+        self.Adr23=[138]
+        self.Adr23.append("L3 Scheinleistung-")
+        self.Adr23.append("U32")
+        self.Adr23.append(0)
+        self.Adr24=[]
+        self.Adr24=[140]
+        self.Adr24.append("L3 Strom")
+        self.Adr24.append("U32")
+        self.Adr24.append(0)
+        self.Adr25=[]
+        self.Adr25=[142]
+        self.Adr25.append("L3 Spannung")
+        self.Adr25.append("U32")
+        self.Adr25.append(0)
+        self.Adr26=[]
+        self.Adr26=[144]
+        self.Adr26.append("L3 Leistungsfaktor")
+        self.Adr26.append("U32")
+        self.Adr26.append(0)
+
+        self.Adr27=[]
+        self.Adr27=[0]
+        self.Adr27.append("Wirkleistung+")
+        self.Adr27.append("U32")
+        self.Adr27.append(0)
+        self.Adr28=[]
+        self.Adr28=[2]
+        self.Adr28.append("Wirkleistung-")
+        self.Adr28.append("U32")
+        self.Adr28.append(0)
+        self.Adr29=[]
+        self.Adr29=[4]
+        self.Adr29.append("Blindleistung+")
+        self.Adr29.append("U32")
+        self.Adr29.append(0)
+        self.Adr30=[]
+        self.Adr30=[6]
+        self.Adr30.append("Blindleistung-")
+        self.Adr30.append("U32")
+        self.Adr30.append(0)
+        self.Adr31=[]
+        self.Adr31=[16]
+        self.Adr31.append("Scheinleistung+")
+        self.Adr31.append("U32")
+        self.Adr31.append(0)
+        self.Adr32=[]
+        self.Adr32=[18]
+        self.Adr32.append("Scheinleistung-")
+        self.Adr32.append("U32")
+        self.Adr32.append(0)
+        self.Adr33=[]
+        self.Adr33=[24]
+        self.Adr33.append("Leistungsfaktor")
+        self.Adr33.append("U32")
+        self.Adr33.append(0)
+        self.Adr34=[]
+        self.Adr34=[26]
+        self.Adr34.append("Frequenz")
+        self.Adr34.append("U32")
+        self.Adr34.append(0)
+
+      
+    #-----------------------------------------
+    # Routine to read a string from one address with 8 registers 
+    def ReadStr8(self,myadr_dec):   
+        r1=self.client.read_holding_registers(myadr_dec,8,unit=71)
+        STRG8Register = BinaryPayloadDecoder.fromRegisters(r1.registers, byteorder=Endian.Big)
+        result_STRG8Register =STRG8Register.decode_string(8)      
+        return(result_STRG8Register) 
+    #-----------------------------------------
+    # Routine to read a Float from one address with 2 registers     
+    def ReadFloat(self,myadr_dec):
+        r1=self.client.read_holding_registers(myadr_dec,2,unit=71)
+        FloatRegister = BinaryPayloadDecoder.fromRegisters(r1.registers, byteorder=Endian.Big, wordorder=Endian.Little)
+        result_FloatRegister =round(FloatRegister.decode_32bit_float(),2)
+        return(result_FloatRegister)   
+    #-----------------------------------------
+    # Routine to read a U16 from one address with 1 register 
+    def ReadU16_1(self,myadr_dec):
+        r1=self.client.read_holding_registers(myadr_dec,1,unit=71)
+        U16register = BinaryPayloadDecoder.fromRegisters(r1.registers, byteorder=Endian.Big, wordorder=Endian.Little)
+        result_U16register = U16register.decode_16bit_uint()
+        return(result_U16register)
+    #-----------------------------------------
+    # Routine to read a U16 from one address with 2 registers 
+    def ReadU16_2(self,myadr_dec):
+        r1=self.client.read_holding_registers(myadr_dec,2,unit=71)
+        U16register = BinaryPayloadDecoder.fromRegisters(r1.registers, byteorder=Endian.Big, wordorder=Endian.Little)
+        result_U16register = U16register.decode_16bit_uint()
+        return(result_U16register)
+    #-----------------------------------------
+    # Routine to read a U32 from one address with 2 registers 
+    def ReadU32(self,myadr_dec):
+        r1=self.client.read_holding_registers(myadr_dec,2,71)
+        #print ("r1 ", r1.registers)
+        U32register = BinaryPayloadDecoder.fromRegisters(r1.registers, byteorder=Endian.BIG, wordorder=Endian.LITTLE)
+        #print ("U32register is", U32register)
+        #result_U32register = U32register.decode_32bit_float()
+        #result_U32register = U32register.decode_32bit_uint()
+        result_U32register = r1.registers[1]
+        return(result_U32register)
+    #-----------------------------------------
+    def ReadU32new(self,myadr_dec):
+        print ("I am in ReadU32new with", myadr_dec)
+        r1=self.client.read_holding_registers(myadr_dec,2,unit=71)
+        U32register = BinaryPayloadDecoder.fromRegisters(r1.registers, byteorder=Endian.Big, wordorder=Endian.Little)
+        result_U32register = U32register.decode_32bit_uint()
+        return(result_U32register)
+    #-----------------------------------------    
+    # Routine to read a U32 from one address with 2 registers 
+    def ReadS16(self,myadr_dec):
+        r1=self.client.read_holding_registers(myadr_dec,1,unit=71)
+        S16register = BinaryPayloadDecoder.fromRegisters(r1.registers, byteorder=Endian.Big, wordorder=Endian.Little)
+        result_S16register = S16register.decode_16bit_uint()
+        return(result_S16register)
+                          
+        
+    try:
+        def run(self):
+            
+            self.client = ModbusTcpClient(self.inverter_ip,port=self.inverter_port)            
+            self.client.connect()
+
+            # LONG List of reads...
+            self.Adr0[3]=self.ReadU32(self.Adr0[0])
+            self.Adr1[3]=self.ReadU32(self.Adr1[0])
+            self.Adr2[3]=self.ReadU32(self.Adr2[0])
+            self.Adr3[3]=self.ReadU32(self.Adr3[0])
+            self.Adr4[3]=self.ReadU32(self.Adr4[0])
+            self.Adr5[3]=self.ReadU32(self.Adr5[0])
+            self.Adr6[3]=self.ReadU32(self.Adr6[0])
+            self.Adr7[3]=self.ReadU32(self.Adr7[0])
+            self.Adr8[3]=self.ReadU32(self.Adr8[0])
+            self.Adr9[3]=self.ReadU32(self.Adr9[0])
+            self.Adr10[3]=self.ReadU32(self.Adr10[0])
+            self.Adr11[3]=self.ReadU32(self.Adr11[0])
+            self.Adr12[3]=self.ReadU32(self.Adr12[0])
+            self.Adr13[3]=self.ReadU32(self.Adr13[0])
+            self.Adr14[3]=self.ReadU32(self.Adr14[0])
+            self.Adr15[3]=self.ReadU32(self.Adr15[0])
+            self.Adr16[3]=self.ReadU32(self.Adr16[0])
+            self.Adr17[3]=self.ReadU32(self.Adr17[0])
+            self.Adr18[3]=self.ReadU32(self.Adr18[0])
+            self.Adr19[3]=self.ReadU32(self.Adr19[0])
+            self.Adr20[3]=self.ReadU32(self.Adr20[0])
+            self.Adr21[3]=self.ReadU32(self.Adr21[0])
+            self.Adr22[3]=self.ReadU32(self.Adr22[0])
+            self.Adr23[3]=self.ReadU32(self.Adr23[0])
+            self.Adr24[3]=self.ReadU32(self.Adr24[0])
+            self.Adr25[3]=self.ReadU32(self.Adr25[0])
+            self.Adr26[3]=self.ReadU32(self.Adr26[0])
+            now = datetime.now().time()
+            if now >= datetime.strptime("01:00", "%H:%M").time() and now <= datetime.strptime("04:00", "%H:%M").time() or now >= datetime.strptime("12:00", "%H:%M").time() and now <= datetime.strptime("15:00", "%H:%M").time():
+                value=round(min([(8000-int(self.ReadU32(self.Adr0[0]))/10)*3,(8000-int(self.ReadU32(self.Adr9[0]))/10)*3,(8000-int(self.ReadU32(self.Adr18[0]))/10)*3]),0)
+                print(value)
+                self.Adr28[3]=int(value)*10
+                #self.Adr28[3]=value-(int(self.ReadU32(self.Adr0[0]))+int(self.ReadU32(self.Adr9[0]))+int(self.ReadU32(self.Adr18[0]))) #Man in the middle Einspeisung vorgaukeln
+                if int(self.Adr28[3]) >= 0 and int(self.Adr28[3]) < value:
+                    self.Adr27[3] = 0
+                    print("IF")
+                else:
+                    self.Adr28[3] = int(value)*10 #(int(self.ReadU32(self.Adr1[0]))+int(self.ReadU32(self.Adr10[0]))+int(self.ReadU32(self.Adr19[0])))
+                    self.Adr27[3]=0#(int(self.ReadU32(self.Adr0[0]))+int(self.ReadU32(self.Adr9[0]))+int(self.ReadU32(self.Adr18[0])))-value
+                    print("ELSE")
+                if self.Adr28[3] == 0:
+                    self.Adr27[3]=(int(self.ReadU32(self.Adr0[0]))+int(self.ReadU32(self.Adr9[0]))+int(self.ReadU32(self.Adr18[0])))-value
+                if self.Adr27[3] < 0:
+                    self.Adr27[3] = 0
+            else:
+                self.Adr27[3]=self.ReadU32(self.Adr27[0])
+                self.Adr28[3]=self.ReadU32(self.Adr28[0])
+            self.Adr29[3]=self.ReadU32(self.Adr29[0])
+            self.Adr30[3]=self.ReadU32(self.Adr30[0])
+            self.Adr31[3]=self.ReadU32(self.Adr31[0])
+            self.Adr32[3]=self.ReadU32(self.Adr32[0])
+            self.Adr33[3]=self.ReadU32(self.Adr33[0])
+            self.Adr34[3]=self.ReadU32(self.Adr34[0])
+
+            #self.Adr8192[3]=self.ReadU16_1(self.Adr8192[0])
+            #print("read success")
+            self.KostalRegister=[]
+            self.KostalRegister.append(self.Adr0)
+            self.KostalRegister.append(self.Adr1)
+            self.KostalRegister.append(self.Adr2)
+            self.KostalRegister.append(self.Adr3)
+            self.KostalRegister.append(self.Adr4)
+            self.KostalRegister.append(self.Adr5)
+            self.KostalRegister.append(self.Adr6)
+            self.KostalRegister.append(self.Adr7)
+            self.KostalRegister.append(self.Adr8)
+            self.KostalRegister.append(self.Adr9)
+            self.KostalRegister.append(self.Adr10)
+            self.KostalRegister.append(self.Adr11)
+            self.KostalRegister.append(self.Adr12)
+            self.KostalRegister.append(self.Adr13)
+            self.KostalRegister.append(self.Adr14)
+            self.KostalRegister.append(self.Adr15)
+            self.KostalRegister.append(self.Adr16)
+            self.KostalRegister.append(self.Adr17)
+            self.KostalRegister.append(self.Adr18)
+            self.KostalRegister.append(self.Adr19)
+            self.KostalRegister.append(self.Adr20)
+            self.KostalRegister.append(self.Adr21)
+            self.KostalRegister.append(self.Adr22)
+            self.KostalRegister.append(self.Adr23)
+            self.KostalRegister.append(self.Adr24)
+            self.KostalRegister.append(self.Adr25)
+            self.KostalRegister.append(self.Adr26)
+            self.KostalRegister.append(self.Adr27)
+            self.KostalRegister.append(self.Adr28)
+            self.KostalRegister.append(self.Adr29)
+            self.KostalRegister.append(self.Adr30)
+            self.KostalRegister.append(self.Adr31)
+            self.KostalRegister.append(self.Adr32)
+            self.KostalRegister.append(self.Adr33)
+            self.KostalRegister.append(self.Adr34)
+
+            #self.KostalRegister.append(self.Adr8192)
+            
+            self.client.close()
+
+
+    except Exception as ex:
+            print ("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
+            print ("XXX- Hit the following error :From subroutine kostal_em_query :", ex)
+            print ("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
+#-----------------------------
+
+
+if __name__ == "__main__":  
+    while(1==1):
+        #time.sleep(1.0)
+        print ("Starting QUERY .......... ")
+        try:
+            Kostalvalues =[]
+            Kostalquery = kostal_em_query()
+            Kostalquery.run()
+        except Exception as ex:
+            print ("Issues querying Kostal Plenticore -ERROR :", ex)
+        result=""
+        for elements in Kostalquery.KostalRegister:
+            print ( elements[0], elements[1], elements[2], elements[3])
+            result=result+str(elements[3])+";"
+        f = open("/media/ramdisk/kostal.txt", "w")
+        f.write(result)
+        f.close()
+
+        #open and read the file after the appending:
+        f = open("/media/ramdisk/kostal.txt", "r")
+        print(f.read()) 
+        print ("Done...")
+        #pprint(Kostalquery.KostalRegister)
+        ##########################################
+        print ("----------------------------------")
+
+    
