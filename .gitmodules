@@ -1,3 +1,3 @@
-[submodule "sma-emeter-simulator"]
-	path = sma-emeter-simulator
-	url = git@github.com:BugUser0815/sma-emeter-simulator
+[submodule "libspeedwire"]
+	path = libspeedwire
+	url = https://github.com/BugUser0815/libspeedwire.git
