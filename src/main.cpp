@@ -49,7 +49,7 @@ uint32_t oldU32(const std::vector<uint16_t>& b,uint16_t base,uint16_t addr){size
 struct Values{std::array<double,35> v{};};
 
 Values readKsem(ModbusTcp& mb,double peakW){
-    auto total=mb.read(0,28), l1=mb.read(40,25), l2=mb.read(80,25), l3=mb.read(120,25); Values x;
+    auto total=mb.read(0,28), l1=mb.read(40,26), l2=mb.read(80,26), l3=mb.read(120,26); Values x;
     const uint16_t bases[3]={40,80,120}; const std::vector<uint16_t>* blocks[3]={&l1,&l2,&l3}; const uint16_t off[9]={0,2,4,6,16,18,20,22,24};
     for(int p=0;p<3;++p)for(int j=0;j<9;++j)x.v[p*9+j]=oldU32(*blocks[p],bases[p],bases[p]+off[j]);
     double real=x.v[0]+x.v[9]+x.v[18], peak=peakW*10.0;
