@@ -48,6 +48,16 @@ struct ModbusTcp {
 uint32_t oldU32(const std::vector<uint16_t>& b,uint16_t base,uint16_t addr){size_t i=addr-base+1;if(i>=b.size())throw std::runtime_error("register range");return b[i];}
 struct Values{std::array<double,35> v{};};
 
+std::vector<std::string> localIpv4Interfaces(const LocalHost& lh){
+    std::vector<std::string> result;
+    for(const auto& info:lh.getLocalInterfaceInfos()){
+        for(const auto& ip:info.ip_addresses){
+            if(AddressConversion::isIpv4(ip)&&ip.rfind("127.",0)!=0&&std::find(result.begin(),result.end(),ip)==result.end()) result.push_back(ip);
+        }
+    }
+    return result;
+}
+
 Values readKsem(ModbusTcp& mb,double peakW){
     auto total=mb.read(0,28), l1=mb.read(40,26), l2=mb.read(80,26), l3=mb.read(120,26); Values x;
     const uint16_t bases[3]={40,80,120}; const std::vector<uint16_t>* blocks[3]={&l1,&l2,&l3}; const uint16_t off[9]={0,2,4,6,16,18,20,22,24};
@@ -70,7 +80,7 @@ void sendSma(const Values& x){
     o=put(m,o,ObisData::PositiveActivePowerL2,x.v[9]/10);o=put(m,o,ObisData::PositiveActiveEnergyL2,0.0);o=put(m,o,ObisData::NegativeActivePowerL2,x.v[10]/10);o=put(m,o,ObisData::NegativeActiveEnergyL2,0.0);o=put(m,o,ObisData::PositiveReactivePowerL2,x.v[11]/10);o=put(m,o,ObisData::PositiveReactiveEnergyL2,0.0);o=put(m,o,ObisData::NegativeReactivePowerL2,x.v[12]/10);o=put(m,o,ObisData::NegativeReactiveEnergyL2,0.0);o=put(m,o,ObisData::PositiveApparentPowerL2,x.v[13]/10);o=put(m,o,ObisData::PositiveApparentEnergyL2,0.0);o=put(m,o,ObisData::NegativeApparentPowerL2,x.v[14]/10);o=put(m,o,ObisData::NegativeApparentEnergyL2,0.0);o=put(m,o,ObisData::CurrentL2,x.v[15]);o=put(m,o,ObisData::VoltageL2,(x.v[16]/1000+200)*1000);o=put(m,o,ObisData::PowerFactorL2,x.v[17]/1000);
     o=put(m,o,ObisData::PositiveActivePowerL3,x.v[18]/10);o=put(m,o,ObisData::PositiveActiveEnergyL3,0.0);o=put(m,o,ObisData::NegativeActivePowerL3,x.v[19]/10);o=put(m,o,ObisData::NegativeActiveEnergyL3,0.0);o=put(m,o,ObisData::PositiveReactivePowerL3,x.v[20]/10);o=put(m,o,ObisData::PositiveReactiveEnergyL3,0.0);o=put(m,o,ObisData::NegativeReactivePowerL3,x.v[21]/10);o=put(m,o,ObisData::NegativeReactiveEnergyL3,0.0);o=put(m,o,ObisData::PositiveApparentPowerL3,x.v[22]/10);o=put(m,o,ObisData::PositiveApparentEnergyL3,0.0);o=put(m,o,ObisData::NegativeApparentPowerL3,x.v[23]/10);o=put(m,o,ObisData::NegativeApparentEnergyL3,0.0);o=put(m,o,ObisData::CurrentL3,x.v[24]);o=put(m,o,ObisData::VoltageL3,(x.v[25]/1000+200)*1000);o=put(m,o,ObisData::PowerFactorL3,x.v[26]/1000);o=put(m,o,ObisData::SoftwareVersion,std::string("2.03.4.R"));
     if(o!=end)throw std::runtime_error("SMA packet size mismatch"); m.setTime((uint32_t)lh.getUnixEpochTimeInMs());
-    for(const auto& ip:lh.getLocalIPv4Addresses()){SpeedwireSocket s=SpeedwireSocketFactory::getInstance(lh)->getSendSocket(SpeedwireSocketFactory::SocketType::MULTICAST,ip);int n=s.sendto(udp,sizeof(udp),s.getSpeedwireMulticastIn4Address(),AddressConversion::toInAddress(ip));if(n!=(int)sizeof(udp))throw std::runtime_error("multicast send");}
+    auto ips=localIpv4Interfaces(lh); if(ips.empty())throw std::runtime_error("no non-loopback IPv4 interface"); for(const auto& ip:ips){SpeedwireSocket s=SpeedwireSocketFactory::getInstance(lh)->getSendSocket(SpeedwireSocketFactory::SocketType::MULTICAST,ip);int n=s.sendto(udp,sizeof(udp),s.getSpeedwireMulticastIn4Address(),AddressConversion::toInAddress(ip));if(n!=(int)sizeof(udp))throw std::runtime_error("multicast send via "+ip);std::cerr<<"sent "<<n<<" bytes via "<<ip<<" to 239.12.255.254:9522\n";}
 }
 }
 
