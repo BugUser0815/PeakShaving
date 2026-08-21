@@ -62,7 +62,7 @@ void* put(SpeedwireEmeterProtocol& p,void* o,const ObisData& s,const std::string
 
 void sendSma(const Values& x){
     LocalHost& lh=LocalHost::getInstance(); uint8_t udp[UDP_PACKET_SIZE]{}; SpeedwireHeader h(udp,sizeof(udp)); auto hl=h.getDefaultHeaderTotalLength(1,0,0); h.setDefaultHeader(1,uint16_t(UDP_PACKET_SIZE-hl),PROTOCOL_ID);
-    auto* end=(uint8_t*)h.findTagPacket(SpeedwireTagHeader::sma_tag_endofdata); SpeedwireData2Packet d(h); SpeedwireEmeterProtocol m(d); m.setSusyID(SUSY_ID);m.setSerialNumber(SERIAL_NUMBER);m.setTime((uint32_t)lh.getUnixEpochTimeInMs()); void* o=m.getFirstObisElement();
+    auto* end=(uint8_t*)h.findTagPacket(SpeedwireTagHeader::sma_tag_endofdata); SpeedwireData2Packet d(h); SpeedwireEmeterProtocol m(d); m.setSusyID(SUSY_ID);m.setSerialNumber(SERIAL_NUMBER);m.setTime((uint32_t)lh.getUnixEpochTimeInMs()); void* o=const_cast<void*>(m.getFirstObisElement());
     o=put(m,o,ObisData::PositiveActivePowerTotal,x.v[27]/10);o=put(m,o,ObisData::PositiveActiveEnergyTotal,0.0);o=put(m,o,ObisData::NegativeActivePowerTotal,x.v[28]/10);o=put(m,o,ObisData::NegativeActiveEnergyTotal,0.0);
     o=put(m,o,ObisData::PositiveReactivePowerTotal,x.v[29]/10);o=put(m,o,ObisData::PositiveReactiveEnergyTotal,0.0);o=put(m,o,ObisData::NegativeReactivePowerTotal,x.v[30]/10);o=put(m,o,ObisData::NegativeReactiveEnergyTotal,0.0);
     o=put(m,o,ObisData::PositiveApparentPowerTotal,x.v[31]/10);o=put(m,o,ObisData::PositiveApparentEnergyTotal,0.0);o=put(m,o,ObisData::NegativeApparentPowerTotal,x.v[32]/10);o=put(m,o,ObisData::NegativeApparentEnergyTotal,0.0);o=put(m,o,ObisData::PowerFactorTotal,x.v[33]/1000);o=put(m,o,ObisData::Frequency,x.v[34]/1000);
