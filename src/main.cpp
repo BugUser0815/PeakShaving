@@ -27,6 +27,7 @@ constexpr size_t UDP_PACKET_SIZE=608;
 constexpr uint16_t PROTOCOL_ID=SpeedwireData2Packet::sma_emeter_protocol_id;
 constexpr uint16_t SI_SOC_REGISTER=30845;
 constexpr double SI_MAX_DISCHARGE_W=18000.0;
+constexpr double SI_MAX_CHARGE_W=18000.0;
 constexpr double SOC_DERATE_START=20.0;
 constexpr double SOC_DERATE_STOP=11.0;
 constexpr double SOC_HYSTERESIS_RELEASE=21.0;
@@ -65,17 +66,26 @@ std::vector<std::string> localIpv4Interfaces(const LocalHost& lh){
     return result;
 }
 
-Values readKsem(ModbusTcp& mb,double peakW){
+Values readKsem(ModbusTcp& mb){
     int fd=mb.connectSocket();
     try{
         auto total=mb.read(fd,0,28), l1=mb.read(fd,40,26), l2=mb.read(fd,80,26), l3=mb.read(fd,120,26); Values x;
         close(fd); fd=-1;
         const uint16_t bases[3]={40,80,120}; const std::vector<uint16_t>* blocks[3]={&l1,&l2,&l3}; const uint16_t off[9]={0,2,4,6,16,18,20,22,24};
         for(int p=0;p<3;++p)for(int j=0;j<9;++j)x.v[p*9+j]=oldU32(*blocks[p],bases[p],bases[p]+off[j]);
-        double real=x.v[0]+x.v[9]+x.v[18], peak=peakW*10.0;
-        if(real/10.0<peakW){x.v[27]=0;x.v[28]=0;}else{x.v[27]=real-peak;x.v[28]=0;}
         x.v[29]=oldU32(total,0,4);x.v[30]=oldU32(total,0,6);x.v[31]=oldU32(total,0,16);x.v[32]=oldU32(total,0,18);x.v[33]=oldU32(total,0,24);x.v[34]=oldU32(total,0,26);return x;
     }catch(...){if(fd>=0)close(fd);throw;}
+}
+
+double gridPowerW(const Values& x){
+    const double importW=(x.v[0]+x.v[9]+x.v[18])/10.0;
+    const double exportW=(x.v[1]+x.v[10]+x.v[19])/10.0;
+    return importW-exportW;
+}
+
+void setFakePower(Values& x,double fakeW){
+    if(fakeW>=0.0){x.v[27]=fakeW*10.0;x.v[28]=0.0;}
+    else{x.v[27]=0.0;x.v[28]=-fakeW*10.0;}
 }
 
 double readSunnyIslandSoc(ModbusTcp& mb){
@@ -94,8 +104,6 @@ double allowedDischargeW(double soc,bool& limiterActive){
     if(!limiterActive) return SI_MAX_DISCHARGE_W;
     return std::clamp((soc-SOC_DERATE_STOP)*SOC_W_PER_PERCENT,0.0,SI_MAX_DISCHARGE_W);
 }
-
-void applySocLimit(Values& x,double allowedW){x.v[27]=std::min(x.v[27],allowedW*10.0);}
 
 void* put(SpeedwireEmeterProtocol& p,void* o,const ObisData& s,double v){ObisData t(s);t.measurementValues.addMeasurement(v,0);auto a=t.toByteArray();return p.setObisElement(o,a.data());}
 void* put(SpeedwireEmeterProtocol& p,void* o,const ObisData& s,const std::string& v){ObisData t(s);t.measurementValues.value_string=v;auto a=t.toByteArray();return p.setObisElement(o,a.data());}
@@ -119,6 +127,7 @@ int main(int argc,char** argv){
     std::string siHost=argc>5?argv[5]:""; uint16_t siPort=argc>6?std::stoi(argv[6]):502; uint8_t siUnit=argc>7?std::stoi(argv[7]):3;
     ModbusTcp mb{host,port,unit}; ModbusTcp si{siHost,siPort,siUnit};
     bool socLimiterActive=false, haveSoc=false; double soc=100.0, allowedW=SI_MAX_DISCHARGE_W;
+    double fakeW=0.0;
     std::cerr<<"KSEM "<<host<<":"<<port<<" unit="<<unsigned(unit)<<" peak="<<peak<<"W\n";
     if(siHost.empty()) std::cerr<<"Sunny Island SoC limiter disabled (no SI IP)\n";
     else std::cerr<<"Sunny Island "<<siHost<<":"<<siPort<<" unit="<<unsigned(siUnit)<<" SoC register="<<SI_SOC_REGISTER<<"\n";
@@ -128,8 +137,15 @@ int main(int argc,char** argv){
                 try{soc=readSunnyIslandSoc(si); haveSoc=true; allowedW=allowedDischargeW(soc,socLimiterActive);}
                 catch(const std::exception& e){std::cerr<<"Sunny Island SoC read error: "<<e.what()<<"; using "<<(haveSoc?"last valid SoC":"no limit")<<"\n";}
             }
-            auto x=readKsem(mb,peak); if(haveSoc) applySocLimit(x,allowedW); sendSma(x);
-            std::cerr<<"real="<<(x.v[0]+x.v[9]+x.v[18])/10<<"W fake_import="<<x.v[27]/10<<"W fake_export="<<x.v[28]/10<<"W";
+            auto x=readKsem(mb);
+            const double gridW=gridPowerW(x);
+            const double errorW=gridW-peak;
+            fakeW+=errorW;
+            const double maxDischargeW=haveSoc?allowedW:SI_MAX_DISCHARGE_W;
+            fakeW=std::clamp(fakeW,-SI_MAX_CHARGE_W,maxDischargeW);
+            setFakePower(x,fakeW);
+            sendSma(x);
+            std::cerr<<"grid="<<gridW<<"W error="<<errorW<<"W fake_import="<<x.v[27]/10<<"W fake_export="<<x.v[28]/10<<"W";
             if(haveSoc) std::cerr<<" soc="<<soc<<"% max_discharge="<<allowedW<<"W limiter="<<(socLimiterActive?"on":"off");
             std::cerr<<"\n";
         }catch(const std::exception& e){std::cerr<<"error: "<<e.what()<<"\n";}
