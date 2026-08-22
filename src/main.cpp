@@ -118,13 +118,13 @@ int main(int argc,char** argv){
     std::string host=argc>1?argv[1]:"10.0.0.70"; double peak=argc>2?std::stod(argv[2]):11000.0; uint16_t port=argc>3?std::stoi(argv[3]):502; uint8_t unit=argc>4?std::stoi(argv[4]):71;
     std::string siHost=argc>5?argv[5]:""; uint16_t siPort=argc>6?std::stoi(argv[6]):502; uint8_t siUnit=argc>7?std::stoi(argv[7]):3;
     ModbusTcp mb{host,port,unit}; ModbusTcp si{siHost,siPort,siUnit};
-    bool socLimiterActive=false, haveSoc=false; double soc=100.0, allowedW=SI_MAX_DISCHARGE_W; unsigned loop=0;
+    bool socLimiterActive=false, haveSoc=false; double soc=100.0, allowedW=SI_MAX_DISCHARGE_W;
     std::cerr<<"KSEM "<<host<<":"<<port<<" unit="<<unsigned(unit)<<" peak="<<peak<<"W\n";
     if(siHost.empty()) std::cerr<<"Sunny Island SoC limiter disabled (no SI IP)\n";
     else std::cerr<<"Sunny Island "<<siHost<<":"<<siPort<<" unit="<<unsigned(siUnit)<<" SoC register="<<SI_SOC_REGISTER<<"\n";
     for(;;){
         try{
-            if(!siHost.empty() && (loop%5==0 || !haveSoc)){
+            if(!siHost.empty()){
                 try{soc=readSunnyIslandSoc(si); haveSoc=true; allowedW=allowedDischargeW(soc,socLimiterActive);}
                 catch(const std::exception& e){std::cerr<<"Sunny Island SoC read error: "<<e.what()<<"; using "<<(haveSoc?"last valid SoC":"no limit")<<"\n";}
             }
@@ -133,6 +133,6 @@ int main(int argc,char** argv){
             if(haveSoc) std::cerr<<" soc="<<soc<<"% max_discharge="<<allowedW<<"W limiter="<<(socLimiterActive?"on":"off");
             std::cerr<<"\n";
         }catch(const std::exception& e){std::cerr<<"error: "<<e.what()<<"\n";}
-        ++loop; LocalHost::sleep(200);
+        LocalHost::sleep(1000);
     }
 }
