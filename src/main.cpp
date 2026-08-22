@@ -67,12 +67,13 @@ Values readKsem(ModbusTcp& mb,double peakW){
     try{
         auto total=mb.read(fd,0,28), l1=mb.read(fd,40,26), l2=mb.read(fd,80,26), l3=mb.read(fd,120,26); Values x;
         close(fd);
+        fd=-1;
         const uint16_t bases[3]={40,80,120}; const std::vector<uint16_t>* blocks[3]={&l1,&l2,&l3}; const uint16_t off[9]={0,2,4,6,16,18,20,22,24};
         for(int p=0;p<3;++p)for(int j=0;j<9;++j)x.v[p*9+j]=oldU32(*blocks[p],bases[p],bases[p]+off[j]);
         double real=x.v[0]+x.v[9]+x.v[18], peak=peakW*10.0;
         if(real/10.0<peakW){x.v[27]=0;x.v[28]=std::max(0.0,peak-real);}else{x.v[27]=real-peak;x.v[28]=0;}
         x.v[29]=oldU32(total,0,4);x.v[30]=oldU32(total,0,6);x.v[31]=oldU32(total,0,16);x.v[32]=oldU32(total,0,18);x.v[33]=oldU32(total,0,24);x.v[34]=oldU32(total,0,26);return x;
-    }catch(...){close(fd);throw;}
+    }catch(...){if(fd>=0)close(fd);throw;}
 }
 
 void* put(SpeedwireEmeterProtocol& p,void* o,const ObisData& s,double v){ObisData t(s);t.measurementValues.addMeasurement(v,0);auto a=t.toByteArray();return p.setObisElement(o,a.data());}
