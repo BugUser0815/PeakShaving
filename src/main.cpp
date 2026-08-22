@@ -28,19 +28,23 @@ constexpr uint16_t PROTOCOL_ID=SpeedwireData2Packet::sma_emeter_protocol_id;
 
 struct ModbusTcp {
     std::string host; uint16_t port; uint8_t unit; uint16_t tx=1;
-    std::vector<uint16_t> read(uint16_t start,uint16_t count){
+
+    int connectSocket(){
         addrinfo hints{}; hints.ai_family=AF_INET; hints.ai_socktype=SOCK_STREAM; addrinfo* res=nullptr;
         auto ps=std::to_string(port); if(getaddrinfo(host.c_str(),ps.c_str(),&hints,&res)!=0||!res) throw std::runtime_error("getaddrinfo");
         int fd=socket(res->ai_family,res->ai_socktype,res->ai_protocol); if(fd<0){freeaddrinfo(res);throw std::runtime_error("socket");}
         timeval tv{}; tv.tv_sec=2; setsockopt(fd,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv)); setsockopt(fd,SOL_SOCKET,SO_SNDTIMEO,&tv,sizeof(tv));
-        if(connect(fd,res->ai_addr,res->ai_addrlen)!=0){auto e=std::string(strerror(errno));close(fd);freeaddrinfo(res);throw std::runtime_error("connect: "+e);} freeaddrinfo(res);
+        if(connect(fd,res->ai_addr,res->ai_addrlen)!=0){auto e=std::string(strerror(errno));close(fd);freeaddrinfo(res);throw std::runtime_error("connect: "+e);} freeaddrinfo(res); return fd;
+    }
+
+    std::vector<uint16_t> read(int fd,uint16_t start,uint16_t count){
         std::array<uint8_t,12> q{}; q[0]=tx>>8;q[1]=tx;q[5]=6;q[6]=unit;q[7]=3;q[8]=start>>8;q[9]=start;q[10]=count>>8;q[11]=count; ++tx;
-        if(send(fd,q.data(),q.size(),0)!=(ssize_t)q.size()){close(fd);throw std::runtime_error("send");}
+        if(send(fd,q.data(),q.size(),0)!=(ssize_t)q.size()) throw std::runtime_error("send");
         auto recvAll=[&](uint8_t* p,size_t n){size_t got=0;while(got<n){ssize_t r=recv(fd,p+got,n-got,0);if(r<=0)throw std::runtime_error("recv");got+=r;}};
-        std::array<uint8_t,9> h{}; try{recvAll(h.data(),h.size());}catch(...){close(fd);throw;}
-        if(h[7]&0x80){close(fd);throw std::runtime_error("modbus exception "+std::to_string(h[8]));}
-        if(h[7]!=3||h[8]!=count*2){close(fd);throw std::runtime_error("unexpected response");}
-        std::vector<uint8_t> d(count*2); try{recvAll(d.data(),d.size());}catch(...){close(fd);throw;} close(fd);
+        std::array<uint8_t,9> h{}; recvAll(h.data(),h.size());
+        if(h[7]&0x80) throw std::runtime_error("modbus exception "+std::to_string(h[8]));
+        if(h[7]!=3||h[8]!=count*2) throw std::runtime_error("unexpected response");
+        std::vector<uint8_t> d(count*2); recvAll(d.data(),d.size());
         std::vector<uint16_t> r(count); for(size_t i=0;i<r.size();++i) r[i]=(uint16_t(d[i*2])<<8)|d[i*2+1]; return r;
     }
 };
@@ -59,12 +63,16 @@ std::vector<std::string> localIpv4Interfaces(const LocalHost& lh){
 }
 
 Values readKsem(ModbusTcp& mb,double peakW){
-    auto total=mb.read(0,28), l1=mb.read(40,26), l2=mb.read(80,26), l3=mb.read(120,26); Values x;
-    const uint16_t bases[3]={40,80,120}; const std::vector<uint16_t>* blocks[3]={&l1,&l2,&l3}; const uint16_t off[9]={0,2,4,6,16,18,20,22,24};
-    for(int p=0;p<3;++p)for(int j=0;j<9;++j)x.v[p*9+j]=oldU32(*blocks[p],bases[p],bases[p]+off[j]);
-    double real=x.v[0]+x.v[9]+x.v[18], peak=peakW*10.0;
-    if(real/10.0<peakW){x.v[27]=0;x.v[28]=std::max(0.0,peak-real);}else{x.v[27]=real-peak;x.v[28]=0;}
-    x.v[29]=oldU32(total,0,4);x.v[30]=oldU32(total,0,6);x.v[31]=oldU32(total,0,16);x.v[32]=oldU32(total,0,18);x.v[33]=oldU32(total,0,24);x.v[34]=oldU32(total,0,26);return x;
+    int fd=mb.connectSocket();
+    try{
+        auto total=mb.read(fd,0,28), l1=mb.read(fd,40,26), l2=mb.read(fd,80,26), l3=mb.read(fd,120,26); Values x;
+        close(fd);
+        const uint16_t bases[3]={40,80,120}; const std::vector<uint16_t>* blocks[3]={&l1,&l2,&l3}; const uint16_t off[9]={0,2,4,6,16,18,20,22,24};
+        for(int p=0;p<3;++p)for(int j=0;j<9;++j)x.v[p*9+j]=oldU32(*blocks[p],bases[p],bases[p]+off[j]);
+        double real=x.v[0]+x.v[9]+x.v[18], peak=peakW*10.0;
+        if(real/10.0<peakW){x.v[27]=0;x.v[28]=std::max(0.0,peak-real);}else{x.v[27]=real-peak;x.v[28]=0;}
+        x.v[29]=oldU32(total,0,4);x.v[30]=oldU32(total,0,6);x.v[31]=oldU32(total,0,16);x.v[32]=oldU32(total,0,18);x.v[33]=oldU32(total,0,24);x.v[34]=oldU32(total,0,26);return x;
+    }catch(...){close(fd);throw;}
 }
 
 void* put(SpeedwireEmeterProtocol& p,void* o,const ObisData& s,double v){ObisData t(s);t.measurementValues.addMeasurement(v,0);auto a=t.toByteArray();return p.setObisElement(o,a.data());}
@@ -87,5 +95,5 @@ void sendSma(const Values& x){
 int main(int argc,char** argv){
     std::string host=argc>1?argv[1]:"10.0.0.70"; double peak=argc>2?std::stod(argv[2]):11000.0; uint16_t port=argc>3?std::stoi(argv[3]):502; uint8_t unit=argc>4?std::stoi(argv[4]):71; ModbusTcp mb{host,port,unit};
     std::cerr<<"KSEM "<<host<<":"<<port<<" unit="<<unsigned(unit)<<" peak="<<peak<<"W\n";
-    for(;;){try{auto x=readKsem(mb,peak);sendSma(x);std::cerr<<"real="<<(x.v[0]+x.v[9]+x.v[18])/10<<"W fake_import="<<x.v[27]/10<<"W fake_export="<<x.v[28]/10<<"W\n";}catch(const std::exception& e){std::cerr<<"error: "<<e.what()<<"\n";}LocalHost::sleep(1000);}
+    for(;;){try{auto x=readKsem(mb,peak);sendSma(x);std::cerr<<"real="<<(x.v[0]+x.v[9]+x.v[18])/10<<"W fake_import="<<x.v[27]/10<<"W fake_export="<<x.v[28]/10<<"W\n";}catch(const std::exception& e){std::cerr<<"error: "<<e.what()<<"\n";}LocalHost::sleep(200);}
 }
