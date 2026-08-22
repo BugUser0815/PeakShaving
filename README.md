@@ -33,7 +33,7 @@ Bei aktivierter Sunny-Island-Abfrage gilt:
 
 - ab `20 %` SoC beginnt das Derating
 - `18 kW` maximal bei 20 % SoC
-- pro `0,5 %-Punkte` SoC sinkt die maximal angeforderte Entladeleistung um `1 kW`
+- Kennlinie: pro `0,5 %-Punkte` SoC sinkt die maximal angeforderte Entladeleistung rechnerisch um `1 kW`
 - bei `11 %` SoC sind `0 kW` Entladeleistung erlaubt
 - der Limiter wird beim Fallen ab 20 % aktiv
 - Freigabe mit Hysterese erst wieder ab `21 %`
@@ -46,16 +46,21 @@ Formel im Derating-Bereich:
 max_discharge_W = clamp((SoC - 11) * 2000, 0, 18000)
 ```
 
-Beispiele:
+Wichtig: SMA liefert Register 30845 als `U32 FIX0`, also ohne Nachkommastellen. Die Kennlinie unterstützt zwar rechnerisch 0,5-%-Zwischenschritte, mit dem direkten Sunny-Island-Modbuswert entstehen in der Praxis aber 1-%-SoC-Schritte und damit jeweils 2-kW-Leistungsstufen.
+
+Mit den tatsächlich per Register 30845 gelieferten ganzzahligen SoC-Werten ergibt sich daher:
 
 ```text
-20.0 % -> 18 kW
-19.5 % -> 17 kW
-18.0 % -> 14 kW
-15.0 % ->  8 kW
-12.0 % ->  2 kW
-11.5 % ->  1 kW
-11.0 % ->  0 kW
+20 % -> 18 kW
+19 % -> 16 kW
+18 % -> 14 kW
+17 % -> 12 kW
+16 % -> 10 kW
+15 % ->  8 kW
+14 % ->  6 kW
+13 % ->  4 kW
+12 % ->  2 kW
+11 % ->  0 kW
 ```
 
 ## Build
