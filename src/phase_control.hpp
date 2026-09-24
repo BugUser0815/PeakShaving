@@ -14,8 +14,7 @@ inline uint32_t fullU32(const std::vector<uint16_t>& registers, uint16_t base, u
     return (uint32_t(registers[i]) << 16) | registers[i + 1];
 }
 
-constexpr double kMaxPhaseA = 30.0;
-constexpr double kMaxDifferenceA = 20.0;
+constexpr double kMaxPhaseA = 20.0;
 constexpr double kMaxDischargeW = 18000.0;
 
 struct Reading {
@@ -52,18 +51,16 @@ inline Decision calculate(const Reading& r, double peakW, double previousRequest
     std::array<double, 3> unassisted{};
     for (size_t i = 0; i < 3; ++i)
         unassisted[i] = r.signedCurrentA[i] + previousRequestW / (3.0 * r.voltageV[i]);
-    const auto [lo, hi] = std::minmax_element(unassisted.begin(), unassisted.end());
+    const auto hi = std::max_element(unassisted.begin(), unassisted.end());
     Decision d;
     d.maxCurrentA = *hi;
-    d.differenceA = *hi - *lo;
-    const bool imbalance = d.differenceA > kMaxDifferenceA && d.maxCurrentA > kMaxDifferenceA;
-    const bool overload = d.maxCurrentA > kMaxPhaseA;
-    d.phaseActive = imbalance || overload;
+    const auto [measuredLo, measuredHi] = std::minmax_element(r.signedCurrentA.begin(), r.signedCurrentA.end());
+    d.differenceA = *measuredHi - *measuredLo; // diagnostics only
+    d.phaseActive = d.maxCurrentA > kMaxPhaseA;
     double requestW = baseW;
     if (d.phaseActive) {
-        const double targetA = imbalance ? kMaxDifferenceA : kMaxPhaseA;
         const size_t hot = static_cast<size_t>(hi - unassisted.begin());
-        const double phaseW = 3.0 * r.voltageV[hot] * (d.maxCurrentA - targetA);
+        const double phaseW = 3.0 * r.voltageV[hot] * (d.maxCurrentA - kMaxPhaseA);
         requestW = std::max(baseW, std::min({phaseW, kMaxDischargeW, std::max(0.0, r.netImportW + previousRequestW)}));
     }
     d.fakeImportW = requestW;

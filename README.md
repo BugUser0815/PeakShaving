@@ -15,9 +15,9 @@ Die Peak-Shaving-Logik bleibt wie im bisherigen Stand:
 fake grid power = real import - peak target
 ```
 
-Zusätzlich werden die drei KSEM-Phasenströme überwacht. Überschreitet ein bezogener Außenleiter 30 A oder liegt er mehr als 20 A über dem schwächsten Außenleiter, fordert die Bridge über den virtuellen SMA-Zähler zusätzliche Entladung an. Bei Schieflast wird die stärkste Phase auf rechnerisch 20 A, bei einer reinen Phasenüberlast auf 30 A entlastet. Das bestehende 11-kW-Peak-Shaving bleibt als Mindestanforderung bestehen.
+Zusätzlich werden die drei KSEM-Phasenströme überwacht. Überschreitet der Bezug auf einem Außenleiter 20 A, fordert die Bridge über den virtuellen SMA-Zähler symmetrische Entladung mit 20 A als rechnerischem Phasenziel an. Eine Stromdifferenz zwischen den Phasen allein löst keine Unterstützung mehr aus. Das bestehende 11-kW-Peak-Shaving bleibt als Mindestanforderung bestehen.
 
-**Grenze:** Die drei Sunny Islands erhalten einen saldierten Leistungswunsch. Die Bridge verteilt keine unterschiedlichen Sollwerte an die drei Geräte. Eine symmetrische Entladung senkt den Bezug auf der stark belasteten Phase, beseitigt aber die Stromdifferenz zwischen den Außenleitern nicht. Die Regelung ersetzt keinen Leitungsschutz und muss am KSEM/SMA unter realer Last verifiziert werden.
+**Grenze:** Die drei Sunny Islands erhalten einen saldierten Leistungswunsch. Die Bridge verteilt keine unterschiedlichen Sollwerte an die drei Geräte. Eine symmetrische Entladung senkt den Bezug auf der stark belasteten Phase, beseitigt aber die Stromdifferenz zwischen den Außenleitern nicht. Der 20-A-Sollwert ist keine Garantie, dass ein 35-A-SLS bei schnellen Lastsprüngen oder begrenzter SMA-/Batterieleistung nicht auslöst. Die Regelung ersetzt keinen Leitungsschutz und muss am KSEM/SMA unter realer Last verifiziert werden.
 
 Zusätzlich kann der Entladeanteil des virtuellen SMA-Energy-Meters anhand des Sunny-Island-SoC begrenzt werden. Dadurch reduziert der Sunny Island seine Unterstützung sanft, bevor der Akku seine harte Abschaltgrenze erreicht.
 
@@ -27,8 +27,7 @@ Zusätzlich kann der Entladeanteil des virtuellen SMA-Energy-Meters anhand des S
 - KSEM Modbus TCP: `502`
 - KSEM Unit ID: `71`
 - Peak-Ziel: `11000 W`
-- Phasengrenze: `30 A` Bezug je Außenleiter
-- Schieflastauslöser: `20 A` Differenz zwischen stärkstem und schwächstem Außenleiter
+- Phasen-Regelziel: `20 A` Bezug je Außenleiter
 - Sunny Island Modbus TCP: `502`
 - Sunny Island Unit ID: `3`
 - Sunny Island SoC: Register `30845`, U32, FIX0
@@ -37,7 +36,7 @@ Zusätzlich kann der Entladeanteil des virtuellen SMA-Energy-Meters anhand des S
 
 Die KSEM-Register 60/100/140 liefern die Ströme in 0,001 A; 62/102/142 liefern die Spannungen in 0,001 V. Bezug und Einspeisung werden anhand der jeweiligen Wirkleistung mit Vorzeichen versehen. Die Steuerwerte werden als vollständige 32-Bit-Register gelesen; ein einzelnes 16-Bit-Wort würde beispielsweise bei mehr als 6,55 kW Phasenleistung überlaufen.
 
-Die Bridge berechnet jede Sekunde die größere Anforderung aus 11-kW-Peak-Shaving und der Phasengrenze. Die zusätzliche Anforderung wird auf 18 kW und auf den saldierten Netzbezug vor der angeforderten Unterstützung begrenzt. Bei einer aktiven Phasenregelung wird eine gleichzeitige Ladeanforderung unterdrückt. Das SoC-Derating begrenzt anschließend auch diese Entladung.
+Die Bridge berechnet jede Sekunde die größere Anforderung aus 11-kW-Peak-Shaving und dem 20-A-Phasenziel. Die zusätzliche Anforderung wird auf 18 kW und auf den saldierten Netzbezug vor der angeforderten Unterstützung begrenzt. Bei einer aktiven Phasenregelung wird eine gleichzeitige Ladeanforderung unterdrückt. Das SoC-Derating begrenzt anschließend auch diese Entladung. `phase_diff_A` dient nur der Diagnose und beeinflusst den Regler nicht.
 
 Die vorige gesendete Anforderung wird bei der nächsten Messung berücksichtigt, damit eine wirksame Entladung nicht im nächsten Zyklus wieder abgeschaltet wird. Im Log stehen `phase_A` (negativ = Einspeisung), `phase_diff_A`, `phase_assist`, `extra_request`, `fake_import` und `fake_export`.
 

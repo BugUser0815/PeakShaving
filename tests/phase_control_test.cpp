@@ -8,6 +8,12 @@ int main() {
     Reading r{{15, 15, 15}, {230, 230, 230}, 13000};
     auto d = phase_control::calculate(r, 11000, 0);
     assert(d.fakeImportW == 2000 && d.extraW == 0 && !d.phaseActive);
+    r = {{20, -5, 5}, {230, 230, 230}, 4600};
+    d = phase_control::calculate(r, 11000, 0);
+    assert(!d.phaseActive && d.differenceA == 25 && d.fakeImportW == 0);
+    r = {{20.1, 5, 5}, {230, 230, 230}, 6923};
+    d = phase_control::calculate(r, 11000, 0);
+    assert(d.phaseActive && std::abs(d.fakeImportW - 69) < 0.01);
     r = {{31, 29, 29}, {230, 230, 230}, 20000};
     d = phase_control::calculate(r, 11000, 0);
     assert(d.phaseActive && d.fakeImportW == 9000); // existing 11 kW peak wins
@@ -23,7 +29,7 @@ int main() {
     assert(next.phaseActive && std::abs(next.fakeImportW - 7590) < 0.01);
     r = {{35, 34, 33}, {230, 230, 230}, 18000};
     d = phase_control::calculate(r, 11000, 0);
-    assert(d.phaseActive && d.fakeImportW == 7000); // peak request dominates
+    assert(d.phaseActive && d.fakeImportW == 10350); // 20 A phase target wins
     r = {{25, 2, 3}, {230, 230, 230}, 8000};
     d = phase_control::calculate(r, 11000, 0);
     assert(d.phaseActive && std::abs(d.fakeImportW - 3450) < 0.01);
