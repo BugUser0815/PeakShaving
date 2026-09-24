@@ -15,6 +15,10 @@ Die Peak-Shaving-Logik bleibt wie im bisherigen Stand:
 fake grid power = real import - peak target
 ```
 
+Zusätzlich werden die drei KSEM-Phasenströme überwacht. Überschreitet ein bezogener Außenleiter 30 A oder liegt er mehr als 20 A über dem schwächsten Außenleiter, fordert die Bridge über den virtuellen SMA-Zähler zusätzliche Entladung an. Bei Schieflast wird die stärkste Phase auf rechnerisch 20 A, bei einer reinen Phasenüberlast auf 30 A entlastet. Das bestehende 11-kW-Peak-Shaving bleibt als Mindestanforderung bestehen.
+
+**Grenze:** Die drei Sunny Islands erhalten einen saldierten Leistungswunsch. Die Bridge verteilt keine unterschiedlichen Sollwerte an die drei Geräte. Eine symmetrische Entladung senkt den Bezug auf der stark belasteten Phase, beseitigt aber die Stromdifferenz zwischen den Außenleitern nicht. Die Regelung ersetzt keinen Leitungsschutz und muss am KSEM/SMA unter realer Last verifiziert werden.
+
 Zusätzlich kann der Entladeanteil des virtuellen SMA-Energy-Meters anhand des Sunny-Island-SoC begrenzt werden. Dadurch reduziert der Sunny Island seine Unterstützung sanft, bevor der Akku seine harte Abschaltgrenze erreicht.
 
 ## Standardwerte
@@ -23,9 +27,19 @@ Zusätzlich kann der Entladeanteil des virtuellen SMA-Energy-Meters anhand des S
 - KSEM Modbus TCP: `502`
 - KSEM Unit ID: `71`
 - Peak-Ziel: `11000 W`
+- Phasengrenze: `30 A` Bezug je Außenleiter
+- Schieflastauslöser: `20 A` Differenz zwischen stärkstem und schwächstem Außenleiter
 - Sunny Island Modbus TCP: `502`
 - Sunny Island Unit ID: `3`
 - Sunny Island SoC: Register `30845`, U32, FIX0
+
+## Phasenregelung
+
+Die KSEM-Register 60/100/140 liefern die Ströme in 0,001 A; 62/102/142 liefern die Spannungen in 0,001 V. Bezug und Einspeisung werden anhand der jeweiligen Wirkleistung mit Vorzeichen versehen. Die Steuerwerte werden als vollständige 32-Bit-Register gelesen; ein einzelnes 16-Bit-Wort würde beispielsweise bei mehr als 6,55 kW Phasenleistung überlaufen.
+
+Die Bridge berechnet jede Sekunde die größere Anforderung aus 11-kW-Peak-Shaving und der Phasengrenze. Die zusätzliche Anforderung wird auf 18 kW und auf den saldierten Netzbezug vor der angeforderten Unterstützung begrenzt. Bei einer aktiven Phasenregelung wird eine gleichzeitige Ladeanforderung unterdrückt. Das SoC-Derating begrenzt anschließend auch diese Entladung.
+
+Die vorige gesendete Anforderung wird bei der nächsten Messung berücksichtigt, damit eine wirksame Entladung nicht im nächsten Zyklus wieder abgeschaltet wird. Im Log stehen `phase_A` (negativ = Einspeisung), `phase_diff_A`, `phase_assist`, `extra_request`, `fake_import` und `fake_export`.
 
 ## SoC-Derating
 
@@ -69,6 +83,7 @@ Mit den tatsächlich per Register 30845 gelieferten ganzzahligen SoC-Werten ergi
 git submodule update --init --recursive
 cmake -S . -B build
 cmake --build build -j
+ctest --test-dir build --output-on-failure
 ```
 
 ## Start
@@ -115,4 +130,4 @@ Der KSEM wird pro Zyklus in vier zusammenhängenden Modbus-Blöcken gelesen und 
 
 ## Kompatibilität
 
-Register-Auswertung und Skalierung des KSEM bilden absichtlich weiterhin das effektive Verhalten des bisherigen funktionierenden Python+C++-Aufbaus nach. Insbesondere bleibt vorerst die alte Auswertung des zweiten 16-Bit-Registers eines angeforderten U32-Paares erhalten. Die neue Sunny-Island-SoC-Abfrage dekodiert Register 30845 dagegen regulär als U32.
+Register-Auswertung und Skalierung des KSEM bilden absichtlich weiterhin das effektive Verhalten des bisherigen funktionierenden Python+C++-Aufbaus nach. Insbesondere bleibt die alte Auswertung des zweiten 16-Bit-Registers eines angeforderten U32-Paares in den übrigen OBIS-Feldern vorerst erhalten. Die Peak- und Phasenregelung verwendet dagegen die vollständigen 32-Bit-KSEM-Werte. Die alten OBIS-Felder sollten vor einer späteren Umstellung separat gegen den realen SMA-Zähler geprüft werden. Die neue Sunny-Island-SoC-Abfrage dekodiert Register 30845 dagegen regulär als U32.

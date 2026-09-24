@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "phase_control.hpp"
 #include <AddressConversion.hpp>
 #include <LocalHost.hpp>
 #include <ObisData.hpp>
@@ -57,6 +58,7 @@ struct ModbusTcp {
 
 uint32_t oldU32(const std::vector<uint16_t>& b,uint16_t base,uint16_t addr){size_t i=addr-base+1;if(i>=b.size())throw std::runtime_error("register range");return b[i];}
 struct Values{std::array<double,35> v{};};
+struct KsemReading{Values values; phase_control::Reading phase;};
 
 std::vector<std::string> localIpv4Interfaces(const LocalHost& lh){
     std::vector<std::string> result;
@@ -65,28 +67,28 @@ std::vector<std::string> localIpv4Interfaces(const LocalHost& lh){
     return result;
 }
 
-Values readKsem(ModbusTcp& mb,double peakW){
+KsemReading readKsem(ModbusTcp& mb){
     int fd=mb.connectSocket();
     try{
-        auto total=mb.read(fd,0,28), l1=mb.read(fd,40,26), l2=mb.read(fd,80,26), l3=mb.read(fd,120,26); Values x;
+        auto total=mb.read(fd,0,28), l1=mb.read(fd,40,26), l2=mb.read(fd,80,26), l3=mb.read(fd,120,26); KsemReading reading; auto& x=reading.values;
         close(fd); fd=-1;
         const uint16_t bases[3]={40,80,120}; const std::vector<uint16_t>* blocks[3]={&l1,&l2,&l3}; const uint16_t off[9]={0,2,4,6,16,18,20,22,24};
         for(int p=0;p<3;++p)for(int j=0;j<9;++j)x.v[p*9+j]=oldU32(*blocks[p],bases[p],bases[p]+off[j]);
 
-        const double importRaw=x.v[0]+x.v[9]+x.v[18];
-        const double exportRaw=x.v[1]+x.v[10]+x.v[19];
-        const double netRaw=importRaw-exportRaw;
-        const double peakRaw=peakW*10.0;
-
-        if(netRaw<peakRaw){
-            x.v[27]=0;
-            x.v[28]=peakRaw-netRaw;
-        }else{
-            x.v[27]=netRaw-peakRaw;
-            x.v[28]=0;
+        // Use the complete 32-bit KSEM values for control. The legacy low-word
+        // conversion remains only in the original per-phase SMA packet fields.
+        for(int p=0;p<3;++p){
+            const auto& block=*blocks[p];
+            const uint16_t base=bases[p];
+            const double importedW=phase_control::fullU32(block,base,base)/10.0;
+            const double exportedW=phase_control::fullU32(block,base,base+2)/10.0;
+            const double currentA=phase_control::fullU32(block,base,base+20)/1000.0;
+            reading.phase.voltageV[p]=phase_control::fullU32(block,base,base+22)/1000.0;
+            reading.phase.signedCurrentA[p]=(exportedW>importedW ? -1.0 : 1.0)*currentA;
+            reading.phase.netImportW+=importedW-exportedW;
         }
 
-        x.v[29]=oldU32(total,0,4);x.v[30]=oldU32(total,0,6);x.v[31]=oldU32(total,0,16);x.v[32]=oldU32(total,0,18);x.v[33]=oldU32(total,0,24);x.v[34]=oldU32(total,0,26);return x;
+        x.v[29]=oldU32(total,0,4);x.v[30]=oldU32(total,0,6);x.v[31]=oldU32(total,0,16);x.v[32]=oldU32(total,0,18);x.v[33]=oldU32(total,0,24);x.v[34]=oldU32(total,0,26);return reading;
     }catch(...){if(fd>=0)close(fd);throw;}
 }
 
@@ -131,6 +133,7 @@ int main(int argc,char** argv){
     std::string siHost=argc>5?argv[5]:""; uint16_t siPort=argc>6?std::stoi(argv[6]):502; uint8_t siUnit=argc>7?std::stoi(argv[7]):3;
     ModbusTcp mb{host,port,unit}; ModbusTcp si{siHost,siPort,siUnit};
     bool socLimiterActive=false, haveSoc=false; double soc=100.0, allowedW=SI_MAX_DISCHARGE_W;
+    double previousRequestW=0.0;
     std::cerr<<"KSEM "<<host<<":"<<port<<" unit="<<unsigned(unit)<<" peak="<<peak<<"W\n";
     if(siHost.empty()) std::cerr<<"Sunny Island SoC limiter disabled (no SI IP)\n";
     else std::cerr<<"Sunny Island "<<siHost<<":"<<siPort<<" unit="<<unsigned(siUnit)<<" SoC register="<<SI_SOC_REGISTER<<"\n";
@@ -140,10 +143,21 @@ int main(int argc,char** argv){
                 try{soc=readSunnyIslandSoc(si); haveSoc=true; allowedW=allowedDischargeW(soc,socLimiterActive);}
                 catch(const std::exception& e){std::cerr<<"Sunny Island SoC read error: "<<e.what()<<"; using "<<(haveSoc?"last valid SoC":"no limit")<<"\n";}
             }
-            auto x=readKsem(mb,peak); if(haveSoc) applySocLimit(x,allowedW); sendSma(x);
-            const double importW=(x.v[0]+x.v[9]+x.v[18])/10.0;
-            const double exportW=(x.v[1]+x.v[10]+x.v[19])/10.0;
-            std::cerr<<"grid_import="<<importW<<"W grid_export="<<exportW<<"W net="<<(importW-exportW)<<"W fake_import="<<x.v[27]/10<<"W fake_export="<<x.v[28]/10<<"W";
+            auto reading=readKsem(mb);
+            auto decision=phase_control::calculate(reading.phase,peak,previousRequestW);
+            auto& x=reading.values;
+            x.v[27]=decision.fakeImportW*10.0;
+            x.v[28]=decision.fakeExportW*10.0;
+            if(haveSoc) applySocLimit(x,allowedW);
+            sendSma(x);
+            previousRequestW=x.v[27]/10.0;
+            std::cerr<<"grid_net="<<reading.phase.netImportW<<"W"
+                     <<" phase_A="<<reading.phase.signedCurrentA[0]<<","
+                     <<reading.phase.signedCurrentA[1]<<","<<reading.phase.signedCurrentA[2]
+                     <<" phase_diff_A="<<decision.differenceA
+                     <<" phase_assist="<<(decision.phaseActive?"on":"off")
+                     <<" extra_request="<<decision.extraW<<"W"
+                     <<" fake_import="<<x.v[27]/10<<"W fake_export="<<x.v[28]/10<<"W";
             if(haveSoc) std::cerr<<" soc="<<soc<<"% max_discharge="<<allowedW<<"W limiter="<<(socLimiterActive?"on":"off");
             std::cerr<<"\n";
         }catch(const std::exception& e){std::cerr<<"error: "<<e.what()<<"\n";}
