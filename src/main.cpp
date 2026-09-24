@@ -7,11 +7,13 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 #include "phase_control.hpp"
+#include "phase_obis.hpp"
 #include <AddressConversion.hpp>
 #include <LocalHost.hpp>
 #include <ObisData.hpp>
@@ -58,7 +60,8 @@ struct ModbusTcp {
 
 uint32_t oldU32(const std::vector<uint16_t>& b,uint16_t base,uint16_t addr){size_t i=addr-base+1;if(i>=b.size())throw std::runtime_error("register range");return b[i];}
 struct Values{std::array<double,35> v{};};
-struct KsemReading{Values values; phase_control::Reading phase;};
+struct KsemReading{Values values; phase_control::Reading phase; std::array<std::array<double,9>,3> physicalObis{};};
+enum class PhaseObisMode{Legacy,Physical,Virtual};
 
 std::vector<std::string> localIpv4Interfaces(const LocalHost& lh){
     std::vector<std::string> result;
@@ -67,13 +70,17 @@ std::vector<std::string> localIpv4Interfaces(const LocalHost& lh){
     return result;
 }
 
-KsemReading readKsem(ModbusTcp& mb){
+KsemReading readKsem(ModbusTcp& mb,PhaseObisMode mode){
     int fd=mb.connectSocket();
     try{
         auto total=mb.read(fd,0,28), l1=mb.read(fd,40,26), l2=mb.read(fd,80,26), l3=mb.read(fd,120,26); KsemReading reading; auto& x=reading.values;
         close(fd); fd=-1;
         const uint16_t bases[3]={40,80,120}; const std::vector<uint16_t>* blocks[3]={&l1,&l2,&l3}; const uint16_t off[9]={0,2,4,6,16,18,20,22,24};
         for(int p=0;p<3;++p)for(int j=0;j<9;++j)x.v[p*9+j]=oldU32(*blocks[p],bases[p],bases[p]+off[j]);
+        if(mode!=PhaseObisMode::Legacy){
+            for(int p=0;p<3;++p) reading.physicalObis[p]=phase_obis::decode(*blocks[p],bases[p]);
+            if(mode==PhaseObisMode::Physical) phase_obis::apply(x.v,reading.physicalObis);
+        }
 
         // Use the complete 32-bit KSEM values for control. The legacy low-word
         // conversion remains only in the original per-phase SMA packet fields.
@@ -114,15 +121,15 @@ void applySocLimit(Values& x,double allowedW){x.v[27]=std::min(x.v[27],allowedW*
 void* put(SpeedwireEmeterProtocol& p,void* o,const ObisData& s,double v){ObisData t(s);t.measurementValues.addMeasurement(v,0);auto a=t.toByteArray();return p.setObisElement(o,a.data());}
 void* put(SpeedwireEmeterProtocol& p,void* o,const ObisData& s,const std::string& v){ObisData t(s);t.measurementValues.value_string=v;auto a=t.toByteArray();return p.setObisElement(o,a.data());}
 
-void sendSma(const Values& x){
+void sendSma(const Values& x,bool physicalPhaseObis){
     LocalHost& lh=LocalHost::getInstance(); uint8_t udp[UDP_PACKET_SIZE]{}; SpeedwireHeader h(udp,sizeof(udp)); auto hl=h.getDefaultHeaderTotalLength(1,0,0); h.setDefaultHeader(1,uint16_t(UDP_PACKET_SIZE-hl),PROTOCOL_ID);
     auto* end=(uint8_t*)h.findTagPacket(SpeedwireTagHeader::sma_tag_endofdata); SpeedwireData2Packet d(h); SpeedwireEmeterProtocol m(d); m.setSusyID(SUSY_ID);m.setSerialNumber(SERIAL_NUMBER);m.setTime((uint32_t)lh.getUnixEpochTimeInMs()); void* o=const_cast<void*>(m.getFirstObisElement());
     o=put(m,o,ObisData::PositiveActivePowerTotal,x.v[27]/10);o=put(m,o,ObisData::PositiveActiveEnergyTotal,0.0);o=put(m,o,ObisData::NegativeActivePowerTotal,x.v[28]/10);o=put(m,o,ObisData::NegativeActiveEnergyTotal,0.0);
     o=put(m,o,ObisData::PositiveReactivePowerTotal,x.v[29]/10);o=put(m,o,ObisData::PositiveReactiveEnergyTotal,0.0);o=put(m,o,ObisData::NegativeReactivePowerTotal,x.v[30]/10);o=put(m,o,ObisData::NegativeReactiveEnergyTotal,0.0);
     o=put(m,o,ObisData::PositiveApparentPowerTotal,x.v[31]/10);o=put(m,o,ObisData::PositiveApparentEnergyTotal,0.0);o=put(m,o,ObisData::NegativeApparentPowerTotal,x.v[32]/10);o=put(m,o,ObisData::NegativeApparentEnergyTotal,0.0);o=put(m,o,ObisData::PowerFactorTotal,x.v[33]/1000);o=put(m,o,ObisData::Frequency,x.v[34]/1000);
-    o=put(m,o,ObisData::PositiveActivePowerL1,x.v[0]);o=put(m,o,ObisData::PositiveActiveEnergyL1,0.0);o=put(m,o,ObisData::NegativeActivePowerL1,x.v[1]/10);o=put(m,o,ObisData::NegativeActiveEnergyL1,0.0);o=put(m,o,ObisData::PositiveReactivePowerL1,x.v[2]/10);o=put(m,o,ObisData::PositiveReactiveEnergyL1,0.0);o=put(m,o,ObisData::NegativeReactivePowerL1,x.v[3]/10);o=put(m,o,ObisData::NegativeReactiveEnergyL1,0.0);o=put(m,o,ObisData::PositiveApparentPowerL1,x.v[4]/10);o=put(m,o,ObisData::PositiveApparentEnergyL1,0.0);o=put(m,o,ObisData::NegativeApparentPowerL1,x.v[5]/10);o=put(m,o,ObisData::NegativeApparentEnergyL1,0.0);o=put(m,o,ObisData::CurrentL1,x.v[6]);o=put(m,o,ObisData::VoltageL1,(x.v[7]/1000+200)*1000);o=put(m,o,ObisData::PowerFactorL1,x.v[8]/1000);
-    o=put(m,o,ObisData::PositiveActivePowerL2,x.v[9]/10);o=put(m,o,ObisData::PositiveActiveEnergyL2,0.0);o=put(m,o,ObisData::NegativeActivePowerL2,x.v[10]/10);o=put(m,o,ObisData::NegativeActiveEnergyL2,0.0);o=put(m,o,ObisData::PositiveReactivePowerL2,x.v[11]/10);o=put(m,o,ObisData::PositiveReactiveEnergyL2,0.0);o=put(m,o,ObisData::NegativeReactivePowerL2,x.v[12]/10);o=put(m,o,ObisData::NegativeReactiveEnergyL2,0.0);o=put(m,o,ObisData::PositiveApparentPowerL2,x.v[13]/10);o=put(m,o,ObisData::PositiveApparentEnergyL2,0.0);o=put(m,o,ObisData::NegativeApparentPowerL2,x.v[14]/10);o=put(m,o,ObisData::NegativeApparentEnergyL2,0.0);o=put(m,o,ObisData::CurrentL2,x.v[15]);o=put(m,o,ObisData::VoltageL2,(x.v[16]/1000+200)*1000);o=put(m,o,ObisData::PowerFactorL2,x.v[17]/1000);
-    o=put(m,o,ObisData::PositiveActivePowerL3,x.v[18]/10);o=put(m,o,ObisData::PositiveActiveEnergyL3,0.0);o=put(m,o,ObisData::NegativeActivePowerL3,x.v[19]/10);o=put(m,o,ObisData::NegativeActiveEnergyL3,0.0);o=put(m,o,ObisData::PositiveReactivePowerL3,x.v[20]/10);o=put(m,o,ObisData::PositiveReactiveEnergyL3,0.0);o=put(m,o,ObisData::NegativeReactivePowerL3,x.v[21]/10);o=put(m,o,ObisData::NegativeReactiveEnergyL3,0.0);o=put(m,o,ObisData::PositiveApparentPowerL3,x.v[22]/10);o=put(m,o,ObisData::PositiveApparentEnergyL3,0.0);o=put(m,o,ObisData::NegativeApparentPowerL3,x.v[23]/10);o=put(m,o,ObisData::NegativeApparentEnergyL3,0.0);o=put(m,o,ObisData::CurrentL3,x.v[24]);o=put(m,o,ObisData::VoltageL3,(x.v[25]/1000+200)*1000);o=put(m,o,ObisData::PowerFactorL3,x.v[26]/1000);o=put(m,o,ObisData::SoftwareVersion,std::string("2.03.4.R"));
+    o=put(m,o,ObisData::PositiveActivePowerL1,x.v[0]);o=put(m,o,ObisData::PositiveActiveEnergyL1,0.0);o=put(m,o,ObisData::NegativeActivePowerL1,x.v[1]/10);o=put(m,o,ObisData::NegativeActiveEnergyL1,0.0);o=put(m,o,ObisData::PositiveReactivePowerL1,x.v[2]/10);o=put(m,o,ObisData::PositiveReactiveEnergyL1,0.0);o=put(m,o,ObisData::NegativeReactivePowerL1,x.v[3]/10);o=put(m,o,ObisData::NegativeReactiveEnergyL1,0.0);o=put(m,o,ObisData::PositiveApparentPowerL1,x.v[4]/10);o=put(m,o,ObisData::PositiveApparentEnergyL1,0.0);o=put(m,o,ObisData::NegativeApparentPowerL1,x.v[5]/10);o=put(m,o,ObisData::NegativeApparentEnergyL1,0.0);o=put(m,o,ObisData::CurrentL1,x.v[6]);o=put(m,o,ObisData::VoltageL1,(physicalPhaseObis ? x.v[7] : (x.v[7]/1000+200)*1000));o=put(m,o,ObisData::PowerFactorL1,x.v[8]/1000);
+    o=put(m,o,ObisData::PositiveActivePowerL2,x.v[9]/10);o=put(m,o,ObisData::PositiveActiveEnergyL2,0.0);o=put(m,o,ObisData::NegativeActivePowerL2,x.v[10]/10);o=put(m,o,ObisData::NegativeActiveEnergyL2,0.0);o=put(m,o,ObisData::PositiveReactivePowerL2,x.v[11]/10);o=put(m,o,ObisData::PositiveReactiveEnergyL2,0.0);o=put(m,o,ObisData::NegativeReactivePowerL2,x.v[12]/10);o=put(m,o,ObisData::NegativeReactiveEnergyL2,0.0);o=put(m,o,ObisData::PositiveApparentPowerL2,x.v[13]/10);o=put(m,o,ObisData::PositiveApparentEnergyL2,0.0);o=put(m,o,ObisData::NegativeApparentPowerL2,x.v[14]/10);o=put(m,o,ObisData::NegativeApparentEnergyL2,0.0);o=put(m,o,ObisData::CurrentL2,x.v[15]);o=put(m,o,ObisData::VoltageL2,(physicalPhaseObis ? x.v[16] : (x.v[16]/1000+200)*1000));o=put(m,o,ObisData::PowerFactorL2,x.v[17]/1000);
+    o=put(m,o,ObisData::PositiveActivePowerL3,x.v[18]/10);o=put(m,o,ObisData::PositiveActiveEnergyL3,0.0);o=put(m,o,ObisData::NegativeActivePowerL3,x.v[19]/10);o=put(m,o,ObisData::NegativeActiveEnergyL3,0.0);o=put(m,o,ObisData::PositiveReactivePowerL3,x.v[20]/10);o=put(m,o,ObisData::PositiveReactiveEnergyL3,0.0);o=put(m,o,ObisData::NegativeReactivePowerL3,x.v[21]/10);o=put(m,o,ObisData::NegativeReactiveEnergyL3,0.0);o=put(m,o,ObisData::PositiveApparentPowerL3,x.v[22]/10);o=put(m,o,ObisData::PositiveApparentEnergyL3,0.0);o=put(m,o,ObisData::NegativeApparentPowerL3,x.v[23]/10);o=put(m,o,ObisData::NegativeApparentEnergyL3,0.0);o=put(m,o,ObisData::CurrentL3,x.v[24]);o=put(m,o,ObisData::VoltageL3,(physicalPhaseObis ? x.v[25] : (x.v[25]/1000+200)*1000));o=put(m,o,ObisData::PowerFactorL3,x.v[26]/1000);o=put(m,o,ObisData::SoftwareVersion,std::string("2.03.4.R"));
     if(o!=end)throw std::runtime_error("SMA packet size mismatch"); m.setTime((uint32_t)lh.getUnixEpochTimeInMs());
     auto ips=localIpv4Interfaces(lh); if(ips.empty())throw std::runtime_error("no non-loopback IPv4 interface"); for(const auto& ip:ips){SpeedwireSocket s=SpeedwireSocketFactory::getInstance(lh)->getSendSocket(SpeedwireSocketFactory::SocketType::MULTICAST,ip);int n=s.sendto(udp,sizeof(udp),s.getSpeedwireMulticastIn4Address(),AddressConversion::toInAddress(ip));if(n!=(int)sizeof(udp))throw std::runtime_error("multicast send via "+ip);}
 }
@@ -131,10 +138,16 @@ void sendSma(const Values& x){
 int main(int argc,char** argv){
     std::string host=argc>1?argv[1]:"10.0.0.70"; double peak=argc>2?std::stod(argv[2]):11000.0; uint16_t port=argc>3?std::stoi(argv[3]):502; uint8_t unit=argc>4?std::stoi(argv[4]):71;
     std::string siHost=argc>5?argv[5]:""; uint16_t siPort=argc>6?std::stoi(argv[6]):502; uint8_t siUnit=argc>7?std::stoi(argv[7]):3;
+    const char* phaseMode=std::getenv("PEAKSHAVING_PHASE_OBIS");
+    PhaseObisMode mode=PhaseObisMode::Legacy;
+    if(phaseMode && std::string(phaseMode)=="physical") mode=PhaseObisMode::Physical;
+    else if(phaseMode && std::string(phaseMode)=="virtual") mode=PhaseObisMode::Virtual;
+    else if(phaseMode) throw std::invalid_argument("PEAKSHAVING_PHASE_OBIS must be physical, virtual or unset");
     ModbusTcp mb{host,port,unit}; ModbusTcp si{siHost,siPort,siUnit};
     bool socLimiterActive=false, haveSoc=false; double soc=100.0, allowedW=SI_MAX_DISCHARGE_W;
     double previousRequestW=0.0;
     std::cerr<<"KSEM "<<host<<":"<<port<<" unit="<<unsigned(unit)<<" peak="<<peak<<"W\n";
+    std::cerr<<"phase OBIS mode="<<(mode==PhaseObisMode::Physical?"physical (experimental)":mode==PhaseObisMode::Virtual?"virtual (experimental)":"legacy")<<"\n";
     if(siHost.empty()) std::cerr<<"Sunny Island SoC limiter disabled (no SI IP)\n";
     else std::cerr<<"Sunny Island "<<siHost<<":"<<siPort<<" unit="<<unsigned(siUnit)<<" SoC register="<<SI_SOC_REGISTER<<"\n";
     for(;;){
@@ -143,13 +156,19 @@ int main(int argc,char** argv){
                 try{soc=readSunnyIslandSoc(si); haveSoc=true; allowedW=allowedDischargeW(soc,socLimiterActive);}
                 catch(const std::exception& e){std::cerr<<"Sunny Island SoC read error: "<<e.what()<<"; using "<<(haveSoc?"last valid SoC":"no limit")<<"\n";}
             }
-            auto reading=readKsem(mb);
+            auto reading=readKsem(mb,mode);
             auto decision=phase_control::calculate(reading.phase,peak,previousRequestW);
             auto& x=reading.values;
             x.v[27]=decision.fakeImportW*10.0;
             x.v[28]=decision.fakeExportW*10.0;
             if(haveSoc) applySocLimit(x,allowedW);
-            sendSma(x);
+            if(mode==PhaseObisMode::Virtual){
+                phase_obis::apply(x.v,phase_obis::virtualPhases(reading.physicalObis,x.v[27]/10.0,x.v[28]/10.0));
+                x.v[29]=x.v[30]=0;
+                x.v[31]=x.v[27]; x.v[32]=x.v[28];
+                x.v[33]=(x.v[27]+x.v[28]>0)?1000:0;
+            }
+            sendSma(x,mode!=PhaseObisMode::Legacy);
             previousRequestW=x.v[27]/10.0;
             std::cerr<<"grid_net="<<reading.phase.netImportW<<"W"
                      <<" phase_A="<<reading.phase.signedCurrentA[0]<<","
@@ -158,6 +177,9 @@ int main(int argc,char** argv){
                      <<" phase_assist="<<(decision.phaseActive?"on":"off")
                      <<" extra_request="<<decision.extraW<<"W"
                      <<" fake_import="<<x.v[27]/10<<"W fake_export="<<x.v[28]/10<<"W";
+            if(mode!=PhaseObisMode::Legacy)
+                std::cerr<<" packet_phase_net_w="<<x.v[0]-x.v[1]/10<<","
+                         <<(x.v[9]-x.v[10])/10<<","<<(x.v[18]-x.v[19])/10;
             if(haveSoc) std::cerr<<" soc="<<soc<<"% max_discharge="<<allowedW<<"W limiter="<<(socLimiterActive?"on":"off");
             std::cerr<<"\n";
         }catch(const std::exception& e){std::cerr<<"error: "<<e.what()<<"\n";}
