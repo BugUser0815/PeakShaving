@@ -73,19 +73,20 @@ KsemReading readKsem(ModbusTcp& mb){
         auto total=mb.read(fd,0,28), l1=mb.read(fd,40,26), l2=mb.read(fd,80,26), l3=mb.read(fd,120,26); KsemReading reading; auto& x=reading.values;
         close(fd); fd=-1;
         const uint16_t bases[3]={40,80,120}; const std::vector<uint16_t>* blocks[3]={&l1,&l2,&l3}; const uint16_t off[9]={0,2,4,6,16,18,20,22,24};
-        for(int p=0;p<3;++p)for(int j=0;j<9;++j)x.v[p*9+j]=oldU32(*blocks[p],bases[p],bases[p]+off[j]);
+        for(int p=0;p<3;++p)for(int j=2;j<9;++j)x.v[p*9+j]=oldU32(*blocks[p],bases[p],bases[p]+off[j]);
 
-        // Use the complete 32-bit KSEM values for control. The legacy low-word
-        // conversion remains only in the original per-phase SMA packet fields.
+        // Use the same complete 32-bit active power for control and SMA.
+        // Keeping only the low word loses 6553.6 W at each phase rollover.
         for(int p=0;p<3;++p){
             const auto& block=*blocks[p];
             const uint16_t base=bases[p];
-            const double importedW=phase_control::fullU32(block,base,base)/10.0;
-            const double exportedW=phase_control::fullU32(block,base,base+2)/10.0;
+            const auto power=phase_control::readActivePower(block,base);
+            x.v[p*9]=power.importRaw;
+            x.v[p*9+1]=power.exportRaw;
             const double currentA=phase_control::fullU32(block,base,base+20)/1000.0;
             reading.phase.voltageV[p]=phase_control::fullU32(block,base,base+22)/1000.0;
-            reading.phase.signedCurrentA[p]=(exportedW>importedW ? -1.0 : 1.0)*currentA;
-            reading.phase.netImportW+=importedW-exportedW;
+            reading.phase.signedCurrentA[p]=(power.exportRaw>power.importRaw ? -1.0 : 1.0)*currentA;
+            reading.phase.netImportW+=power.netImportW();
         }
 
         x.v[29]=oldU32(total,0,4);x.v[30]=oldU32(total,0,6);x.v[31]=oldU32(total,0,16);x.v[32]=oldU32(total,0,18);x.v[33]=oldU32(total,0,24);x.v[34]=oldU32(total,0,26);return reading;
@@ -120,7 +121,7 @@ void sendSma(const Values& x){
     o=put(m,o,ObisData::PositiveActivePowerTotal,x.v[27]/10);o=put(m,o,ObisData::PositiveActiveEnergyTotal,0.0);o=put(m,o,ObisData::NegativeActivePowerTotal,x.v[28]/10);o=put(m,o,ObisData::NegativeActiveEnergyTotal,0.0);
     o=put(m,o,ObisData::PositiveReactivePowerTotal,x.v[29]/10);o=put(m,o,ObisData::PositiveReactiveEnergyTotal,0.0);o=put(m,o,ObisData::NegativeReactivePowerTotal,x.v[30]/10);o=put(m,o,ObisData::NegativeReactiveEnergyTotal,0.0);
     o=put(m,o,ObisData::PositiveApparentPowerTotal,x.v[31]/10);o=put(m,o,ObisData::PositiveApparentEnergyTotal,0.0);o=put(m,o,ObisData::NegativeApparentPowerTotal,x.v[32]/10);o=put(m,o,ObisData::NegativeApparentEnergyTotal,0.0);o=put(m,o,ObisData::PowerFactorTotal,x.v[33]/1000);o=put(m,o,ObisData::Frequency,x.v[34]/1000);
-    o=put(m,o,ObisData::PositiveActivePowerL1,x.v[0]);o=put(m,o,ObisData::PositiveActiveEnergyL1,0.0);o=put(m,o,ObisData::NegativeActivePowerL1,x.v[1]/10);o=put(m,o,ObisData::NegativeActiveEnergyL1,0.0);o=put(m,o,ObisData::PositiveReactivePowerL1,x.v[2]/10);o=put(m,o,ObisData::PositiveReactiveEnergyL1,0.0);o=put(m,o,ObisData::NegativeReactivePowerL1,x.v[3]/10);o=put(m,o,ObisData::NegativeReactiveEnergyL1,0.0);o=put(m,o,ObisData::PositiveApparentPowerL1,x.v[4]/10);o=put(m,o,ObisData::PositiveApparentEnergyL1,0.0);o=put(m,o,ObisData::NegativeApparentPowerL1,x.v[5]/10);o=put(m,o,ObisData::NegativeApparentEnergyL1,0.0);o=put(m,o,ObisData::CurrentL1,x.v[6]);o=put(m,o,ObisData::VoltageL1,(x.v[7]/1000+200)*1000);o=put(m,o,ObisData::PowerFactorL1,x.v[8]/1000);
+    o=put(m,o,ObisData::PositiveActivePowerL1,x.v[0]/10);o=put(m,o,ObisData::PositiveActiveEnergyL1,0.0);o=put(m,o,ObisData::NegativeActivePowerL1,x.v[1]/10);o=put(m,o,ObisData::NegativeActiveEnergyL1,0.0);o=put(m,o,ObisData::PositiveReactivePowerL1,x.v[2]/10);o=put(m,o,ObisData::PositiveReactiveEnergyL1,0.0);o=put(m,o,ObisData::NegativeReactivePowerL1,x.v[3]/10);o=put(m,o,ObisData::NegativeReactiveEnergyL1,0.0);o=put(m,o,ObisData::PositiveApparentPowerL1,x.v[4]/10);o=put(m,o,ObisData::PositiveApparentEnergyL1,0.0);o=put(m,o,ObisData::NegativeApparentPowerL1,x.v[5]/10);o=put(m,o,ObisData::NegativeApparentEnergyL1,0.0);o=put(m,o,ObisData::CurrentL1,x.v[6]);o=put(m,o,ObisData::VoltageL1,(x.v[7]/1000+200)*1000);o=put(m,o,ObisData::PowerFactorL1,x.v[8]/1000);
     o=put(m,o,ObisData::PositiveActivePowerL2,x.v[9]/10);o=put(m,o,ObisData::PositiveActiveEnergyL2,0.0);o=put(m,o,ObisData::NegativeActivePowerL2,x.v[10]/10);o=put(m,o,ObisData::NegativeActiveEnergyL2,0.0);o=put(m,o,ObisData::PositiveReactivePowerL2,x.v[11]/10);o=put(m,o,ObisData::PositiveReactiveEnergyL2,0.0);o=put(m,o,ObisData::NegativeReactivePowerL2,x.v[12]/10);o=put(m,o,ObisData::NegativeReactiveEnergyL2,0.0);o=put(m,o,ObisData::PositiveApparentPowerL2,x.v[13]/10);o=put(m,o,ObisData::PositiveApparentEnergyL2,0.0);o=put(m,o,ObisData::NegativeApparentPowerL2,x.v[14]/10);o=put(m,o,ObisData::NegativeApparentEnergyL2,0.0);o=put(m,o,ObisData::CurrentL2,x.v[15]);o=put(m,o,ObisData::VoltageL2,(x.v[16]/1000+200)*1000);o=put(m,o,ObisData::PowerFactorL2,x.v[17]/1000);
     o=put(m,o,ObisData::PositiveActivePowerL3,x.v[18]/10);o=put(m,o,ObisData::PositiveActiveEnergyL3,0.0);o=put(m,o,ObisData::NegativeActivePowerL3,x.v[19]/10);o=put(m,o,ObisData::NegativeActiveEnergyL3,0.0);o=put(m,o,ObisData::PositiveReactivePowerL3,x.v[20]/10);o=put(m,o,ObisData::PositiveReactiveEnergyL3,0.0);o=put(m,o,ObisData::NegativeReactivePowerL3,x.v[21]/10);o=put(m,o,ObisData::NegativeReactiveEnergyL3,0.0);o=put(m,o,ObisData::PositiveApparentPowerL3,x.v[22]/10);o=put(m,o,ObisData::PositiveApparentEnergyL3,0.0);o=put(m,o,ObisData::NegativeApparentPowerL3,x.v[23]/10);o=put(m,o,ObisData::NegativeApparentEnergyL3,0.0);o=put(m,o,ObisData::CurrentL3,x.v[24]);o=put(m,o,ObisData::VoltageL3,(x.v[25]/1000+200)*1000);o=put(m,o,ObisData::PowerFactorL3,x.v[26]/1000);o=put(m,o,ObisData::SoftwareVersion,std::string("2.03.4.R"));
     if(o!=end)throw std::runtime_error("SMA packet size mismatch"); m.setTime((uint32_t)lh.getUnixEpochTimeInMs());
