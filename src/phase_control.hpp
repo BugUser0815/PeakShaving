@@ -14,6 +14,22 @@ inline uint32_t fullU32(const std::vector<uint16_t>& registers, uint16_t base, u
     return (uint32_t(registers[i]) << 16) | registers[i + 1];
 }
 
+struct ActivePower {
+    uint32_t importRaw = 0; // KSEM unit: 0.1 W
+    uint32_t exportRaw = 0;
+
+    double netImportW() const {
+        // Convert before subtraction so real export cannot wrap as unsigned.
+        return (double(importRaw) - double(exportRaw)) / 10.0;
+    }
+};
+
+// Share the full-width values between control and the per-phase SMA fields.
+inline ActivePower readActivePower(const std::vector<uint16_t>& registers, uint16_t base) {
+    return {fullU32(registers, base, base),
+            fullU32(registers, base, base + 2)};
+}
+
 constexpr double kMaxPhaseA = 20.0;
 constexpr double kMaxDischargeW = 18000.0;
 

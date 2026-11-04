@@ -129,4 +129,8 @@ Der KSEM wird pro Zyklus in vier zusammenhängenden Modbus-Blöcken gelesen und 
 
 ## Kompatibilität
 
-Register-Auswertung und Skalierung des KSEM bilden absichtlich weiterhin das effektive Verhalten des bisherigen funktionierenden Python+C++-Aufbaus nach. Insbesondere bleibt die alte Auswertung des zweiten 16-Bit-Registers eines angeforderten U32-Paares in den übrigen OBIS-Feldern vorerst erhalten. Die Peak- und Phasenregelung verwendet dagegen die vollständigen 32-Bit-KSEM-Werte. Die alten OBIS-Felder sollten vor einer späteren Umstellung separat gegen den realen SMA-Zähler geprüft werden. Die neue Sunny-Island-SoC-Abfrage dekodiert Register 30845 dagegen regulär als U32.
+Die Wirkleistung je Phase wird für die Peak-/Phasenregelung und die entsprechenden SMA-OBIS-Felder aus denselben vollständigen 32-Bit-KSEM-Werten dekodiert. Bezug und Einspeisung haben am KSEM die Einheit 0,1 W; die Übergabe an die SMA-OBIS-Konvertierung erfolgt für alle drei Phasen in Watt.
+
+Bei einer Auswertung nur des unteren 16-Bit-Worts fehlen ab 6553,6 W auf einer Phase jeweils 6553,6 W. Ein synthetisches Beispiel mit 7500 W, 5000 W und 5000 W würde dadurch als 10946,4 W statt 17500 W interpretiert. Der aktuelle `lean`-Stand korrigierte bereits die Steuerwerte; diese Korrektur erfasst zusätzlich die bisher noch abgeschnittenen SMA-Phasenwirkleistungen. `ksem_active_power_test` sichert mit synthetischen Registerwerten die Überlaufgrenzen, die Peak-Anforderung und reale Einspeisung ab.
+
+In den übrigen OBIS-Feldern bleiben die historische Low-Word-Auswertung und Skalierung vorerst erhalten. Sie sollten vor einer späteren Umstellung separat gegen den realen SMA-Zähler geprüft werden. Die Sunny-Island-SoC-Abfrage dekodiert Register 30845 regulär als U32.
